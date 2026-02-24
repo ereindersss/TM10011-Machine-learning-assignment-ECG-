@@ -1,6 +1,9 @@
 import pandas as pd
 import os
+import zipfile
 
+with zipfile.ZipFile("ecg_data.zip","r") as zip_ref:
+    zip_ref.extractall("ecg_data")
 
 def load_data():
     this_directory = os.path.dirname(os.path.abspath(__file__))
