@@ -9,8 +9,8 @@ import seaborn as sns
 from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, RobustScaler
-# from sklearn.compose import ColumnTransformer
-# from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 import sklearn.metrics as sklm
 from sklearn.ensemble import RandomForestClassifier
 #from MLstatkit.stats import Delong_test
@@ -160,4 +160,70 @@ top20.plot(kind='barh')
 plt.xlabel('Mean absolute coefficient')
 plt.title('Features with the highest absolute coefficients (top 20)')
 plt.gca().invert_yaxis() 
+plt.show()
+
+#%% train random forest model
+kf = StratifiedKFold(n_splits=10, shuffle=True, random_state=4)
+
+categorical_features =  data[features].select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
+numeric_features =  data[features].select_dtypes(include=['number']).columns.tolist()
+
+numeric_transformer = Pipeline(steps=[
+    ('imputer', SimpleImputer(strategy='mean')), 
+    ('scaler', RobustScaler()) 
+]) 
+
+categorical_transformer = Pipeline(steps=[
+    ('imputer', SimpleImputer(strategy='most_frequent')),
+    ('encoder', OneHotEncoder(handle_unknown='infrequent_if_exist', sparse_output=False,  drop='if_binary')),
+])
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', numeric_transformer, numeric_features),
+        ('cat', categorical_transformer, categorical_features)])
+
+pipeline_forest = Pipeline(steps=[
+    ('preprocessor', preprocessor),
+    ('classifier', RandomForestClassifier(class_weight='balanced', random_state=42)) 
+])
+
+param_dist_forest = {"classifier__n_estimators": [1, 2, 5, 10, 15, 20, 30, 100],
+              "classifier__max_depth":[5,8,15,25,30],
+              "classifier__min_samples_leaf":[1,2,5,10,15,100],
+              "classifier__max_leaf_nodes": [2, 5, 10]}
+
+grid_search_forest = GridSearchCV(pipeline_forest, param_dist_forest, cv=kf, scoring='roc_auc', n_jobs=-1)
+grid_search_forest.fit(x_train, y_train)
+
+print('Best parameters found:\n', grid_search_forest.best_params_)
+print("Best score:", grid_search_forest.best_score_)
+forest_model = grid_search_forest.best_estimator_ 
+y_pred_forest = forest_model.predict(x_test)  
+probabilities_forest = forest_model.predict_proba(x_test)
+print(f"CL Report of Random Forest:",classification_report(y_test, y_pred_forest, zero_division='warn'))
+precision_forest = precision_score(y_test, y_pred_forest)
+print("Precision of Random Forest:", round(precision_forest,3))
+
+accuracy_forest = sklm.accuracy_score(y_test, y_pred_forest)
+print('Accuracy of Random Forest:', round(accuracy_forest,3))
+
+f1_forest = f1_score(y_test, y_pred_forest)
+print("F1-Score of Random Forest:", round(f1_forest,3))
+
+recall_forest = recall_score(y_test, y_pred_forest)
+print("Recall (Sensitivity) of Random Forest:", round(recall_forest,3))
+
+print('Error rate of Random Forest: {:.2f}'.format(1 - accuracy_forest))
+cm_forest = confusion_matrix(y_test, y_pred_forest)
+sns.heatmap(cm_forest,
+            annot=True,
+            cmap="Blues",
+            fmt='d',
+            xticklabels=['0','1'],
+            yticklabels=['0','1'])
+
+plt.ylabel('Actual',fontsize=12)
+plt.xlabel('Prediction',fontsize=12)
+plt.title('Confusion matrix of the Random Forest')
 plt.show()
