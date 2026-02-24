@@ -38,7 +38,7 @@ print(f'The number of samples: {len(raw_data.index)}')
 print(f'The number of columns: {len(raw_data.columns)}')
 
 #print(raw_data.head())
-print(f'The number of NaN values in the entire dataframe is equal to: {raw_data.isnull().sum().sum()}')
+print(f'The number of NaN values in the entire dataframe: {raw_data.isnull().sum().sum()}')
 print(f'The number of samples with label 0: {len(raw_data[raw_data["label"] == 0])}')
 print(f'The number of samples with label 1: {len(raw_data[raw_data["label"] == 1])}')
 print(f'The percentage of samples with label 0 is thus {len(raw_data[raw_data["label"] == 0])/len(raw_data.index)*100:.2f}%', 
@@ -81,3 +81,83 @@ sns.scatterplot(
     legend="full",
     alpha=0.8
 )
+
+#%% train a logistic regression model
+lr_model = LogisticRegression(penalty='l1', solver='saga', class_weight='balanced', random_state=4)
+lr_model.fit(x_train, y_train)  
+y_pred = lr_model.predict(x_test)  
+probabilities = lr_model.predict_proba(x_test)
+
+print(f"CL Report:",classification_report(y_test, y_pred, zero_division=1))
+
+precision = precision_score(y_test, y_pred)
+print("Precision:", precision)
+
+accuracy = sklm.accuracy_score(y_test, y_pred)
+print('Accuracy:', round(accuracy,3))
+
+f1 = f1_score(y_test, y_pred)
+print("F1-Score:", f1)
+
+recall = recall_score(y_test, y_pred)
+print("Recall (Sensitivity):", recall)
+
+confusion_matrix = confusion_matrix(y_test, y_pred)
+TN, FP, FN, TP = confusion_matrix.ravel()
+print("TN: {}, FP: {}, FN: {}, TP: {}\n".format(TN, FP, FN, TP))
+
+sns.heatmap(confusion_matrix,
+            annot=True,
+            cmap="Blues",
+            fmt='g',
+            xticklabels=['0','1'],
+            yticklabels=['0','1'])
+
+plt.ylabel('Actual',fontsize=12)
+plt.xlabel('Prediction',fontsize=12)
+plt.show()
+
+def plot_auc(labels, probs):
+    fpr = dict()
+    tpr = dict()
+    roc_auc = dict()
+    fpr, tpr, _ = roc_curve(labels.values.ravel(), probs[:,1].ravel())
+    roc_auc = auc(fpr, tpr)
+    
+    plt.figure()
+    plt.plot(fpr, tpr, color = 'orange', label = 'AUC = %0.3f' % roc_auc)
+    plt.plot([0, 1], [0, 1],'r--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Receiver Operating Characteristic')
+    plt.legend()
+    plt.show()
+
+probabilities = lr_model.predict_proba(x_test)
+plot_auc(y_test, probabilities)
+
+#%% examine used features
+features = x_train.columns.tolist()
+print(features)
+
+coefficients = lr_model.coef_[0]
+coefficient_df = pd.DataFrame({
+    'Feature': features,
+    'Coefficient': coefficients,
+    'AbsCoefficient': np.abs(coefficients)
+})
+
+coefficient_list = coefficient_df[['Feature','Coefficient']]
+coefficient_list = coefficient_list.set_index('Feature')
+coefficient_list = coefficient_df.groupby('Feature')['Coefficient'].mean()
+print(coefficient_list)
+
+plt.figure(figsize=(10,6))
+top20 = coefficient_list.sort_values(ascending=False).head(20)
+top20.plot(kind='barh')
+plt.xlabel('Mean absolute coefficient')
+plt.title('Features with the highest absolute coefficients (top 20)')
+plt.gca().invert_yaxis() 
+plt.show()
