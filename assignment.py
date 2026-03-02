@@ -5,11 +5,15 @@ import zipfile
 
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn import datasets as ds
-from sklearn import metrics
+import seaborn
 
+from sklearn import datasets as ds
 from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
+from sklearn import metrics
+from sklearn import model_selection
+from sklearn import preprocessing
+from sklearn import decomposition
 
 from sklearn.naive_bayes import GaussianNB
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
@@ -18,8 +22,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.linear_model import SGDClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
-
-
+from sklearn import neighbors
 
 #%% load data 
 with zipfile.ZipFile("ecg_data.zip","r") as zip_ref:
@@ -81,7 +84,6 @@ Y = data['label']
 
 x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=0.25, random_state=5, stratify=Y)
 
-
 #%% reduce dimensionality with PCA and classify with linear discriminant analysis
 #!!!!!! er wordt een voorspelling gemaakt obv training data ipv te testen met test data
 
@@ -97,8 +99,24 @@ lda = LinearDiscriminantAnalysis()
 lda = lda.fit(x_reduced, y_train)
 y_pred = lda.predict(x_reduced)
 colorplot(lda, ax, x_reduced[:, 0], x_reduced[:, 1])
-print("Number of mislabeled points out of a total %d points : %d" % (x_reduced.shape[0], (y_train != y_pred).sum()))
+print("Number of mislabeled points in the training set out of a total %d points : %d" % (x_reduced.shape[0], (y_train != y_pred).sum()))
 
+# test met test set
+pca = PCA(n_components=2)
+x_train_reduced = pca.fit_transform(x_train)
+x_test_reduced = pca.transform(x_test)  
+
+fig = plt.figure(figsize=(8, 8))
+ax = fig.add_subplot(111)
+ax.set_title("Two informative features, one cluster per class",
+             fontsize='small')
+ax.scatter(x_train_reduced[:, 0], x_train_reduced[:, 1], marker='o', c=y_train,
+           s=25, edgecolor='k', cmap=plt.cm.Paired)
+lda = LinearDiscriminantAnalysis()
+lda = lda.fit(x_train_reduced, y_train)
+y_pred = lda.predict(x_test_reduced)
+colorplot(lda, ax, x_test_reduced[:, 0], x_test_reduced[:, 1])
+print("Number of mislabeled points in the test set out of a total %d points : %d" % (x_test_reduced.shape[0], (y_test != y_pred).sum()))
 
 #%% try out other classifiers
 #!!!!!! er wordt een voorspelling gemaakt obv training data ipv te testen met test data
@@ -190,3 +208,260 @@ for clf, X1, Y1 in zip(clfs_fit, Xt, Yt):
     print('F1:' +str(F1))
     print('precision:' +str(precision))
     print('recall:' +str(recall))
+
+#from the results it seems that these simple classifiers won't be enough
+
+#%% nearest neighbour classification
+k_list = [1, 3, 7]
+fig = plt.figure(figsize=(24,8*len(k_list)))
+num = 0
+
+for k in k_list:
+    clf_knn = neighbors.KNeighborsClassifier(n_neighbors=k)
+    clf_knn.fit(x_train_reduced, y_train)
+
+    # Test the classifier on the training data and plot
+    score_train = clf_knn.score(x_train_reduced, y_train)
+
+    num += 1
+    ax = fig.add_subplot(len(k_list), 2, num)
+    ax.set_title(f"Training performance: accuracy {score_train}")
+    colorplot(clf_knn, ax, x_train_reduced[:, 0], x_train_reduced[:, 1], h=1000)
+    ax.scatter(x_train_reduced[:, 0], x_train_reduced[:, 1], marker='o', c=y_train,
+               s=25, edgecolor='k', cmap=plt.cm.Paired)
+
+    # Test the classifier on the test data and plot
+    score_test = clf_knn.score(x_test_reduced, y_test)
+
+    num += 1
+    ax = fig.add_subplot(len(k_list), 2, num)
+    ax.set_title(f"Test performance: accuracy {score_test}")
+    colorplot(clf_knn, ax, x_test_reduced[:, 0], x_test_reduced[:, 1], h=1000)
+    ax.scatter(x_test_reduced[:, 0], x_test_reduced[:, 1], marker='o', c=y_test,
+               s=25, edgecolor='k', cmap=plt.cm.Paired)
+
+#%% test multiple k's and plot performance with all features (not reduced with PCA)
+train_scores = []
+test_scores = []
+k_list = list(range(1, 25, 2))
+
+for k in k_list:
+    clf_knn = neighbors.KNeighborsClassifier(n_neighbors=k)
+    clf_knn.fit(x_train, y_train)
+
+    # Test the classifier on the training data and plot
+    score_train = clf_knn.score(x_train, y_train)
+    score_test = clf_knn.score(x_test, y_test)
+
+    train_scores.append(score_train)
+    test_scores.append(score_test)
+
+fig = plt.figure(figsize=(8,8))
+ax = fig.add_subplot(111)
+ax.grid()
+ax.plot(k_list, train_scores, 'o-', color="r",
+        label="Training score")
+ax.plot(k_list, test_scores, 'o-', color="g",
+        label="Test score")
+ax.legend(loc="best")
+
+#%% best k for multiple splits of the data
+k_list = list(range(1, 26, 2))
+all_train = []
+all_test = []
+
+# Repeat the experiment 20 times, use 20 random splits in which class balance is retained
+sss = model_selection.StratifiedShuffleSplit(n_splits=20, test_size=0.5, random_state=0)
+
+for train_index, test_index in sss.split(X, Y):
+    train_scores = []
+    test_scores = []
+
+    split_X_train = X.iloc[train_index]
+    split_y_train = Y.iloc[train_index]
+    split_X_test = X.iloc[test_index]
+    split_y_test = Y.iloc[test_index]
+
+    for k in k_list:
+        clf_knn = neighbors.KNeighborsClassifier(n_neighbors=k)
+        clf_knn.fit(split_X_train, split_y_train)
+
+        # Test the classifier on the training data and plot
+        score_train = clf_knn.score(split_X_train, split_y_train)
+        score_test = clf_knn.score(split_X_test, split_y_test)
+
+        train_scores.append(score_train)
+        test_scores.append(score_test)
+
+    all_train.append(train_scores)
+    all_test.append(test_scores)
+
+
+# Create numpy array of scores and calculate the mean and std
+all_train = np.array(all_train)
+all_test = np.array(all_test)
+
+train_scores_mean = all_train.mean(axis=0)
+train_scores_std = all_train.std(axis=0)
+
+test_scores_mean = all_test.mean(axis=0)
+test_scores_std = all_test.std(axis=0)
+
+# Plot the mean scores and the std as shading
+fig = plt.figure(figsize=(8,8))
+ax = fig.add_subplot(111)
+ax.grid()
+ax.fill_between(k_list, train_scores_mean - train_scores_std,
+                     train_scores_mean + train_scores_std, alpha=0.1,
+                     color="r")
+ax.fill_between(k_list, test_scores_mean - test_scores_std,
+                     test_scores_mean + test_scores_std, alpha=0.1,
+                     color="g")
+ax.plot(k_list, train_scores_mean, 'o-', color="r",
+        label="Training score")
+ax.plot(k_list, test_scores_mean, 'o-', color="g",
+        label="Test score")
+ax.legend(loc="best")
+
+#%% view the optimal k with AUC instead of accuracy
+k_list = list(range(1, 26, 2))
+all_train = []
+all_test = []
+
+# Repeat the experiment 20 times, use 20 random splits in which class balance is retained
+sss = model_selection.StratifiedShuffleSplit(n_splits=20, test_size=0.5, random_state=0)
+
+for train_index, test_index in sss.split(X, Y):
+    train_scores = []
+    test_scores = []
+
+    split_X_train = X.iloc[train_index]
+    split_y_train = Y.iloc[train_index]
+    split_X_test = X.iloc[test_index]
+    split_y_test = Y.iloc[test_index]
+
+    for k in k_list:
+        clf_knn = neighbors.KNeighborsClassifier(n_neighbors=k)
+        clf_knn.fit(split_X_train, split_y_train)
+
+        # Test the classifier on the training data and plot
+        train_proba = clf_knn.predict_proba(split_X_train)[:, 1]
+        test_proba = clf_knn.predict_proba(split_X_test)[:, 1]
+
+        score_train = metrics.roc_auc_score(split_y_train, train_proba)
+        score_test = metrics.roc_auc_score(split_y_test, test_proba)
+
+
+        train_scores.append(score_train)
+        test_scores.append(score_test)
+
+    all_train.append(train_scores)
+    all_test.append(test_scores)
+
+
+# Create numpy array of scores and calculate the mean and std
+all_train = np.array(all_train)
+all_test = np.array(all_test)
+
+train_scores_mean = all_train.mean(axis=0)
+train_scores_std = all_train.std(axis=0)
+
+test_scores_mean = all_test.mean(axis=0)
+test_scores_std = all_test.std(axis=0)
+
+# Plot the mean scores and the std as shading
+fig = plt.figure(figsize=(8,8))
+ax = fig.add_subplot(111)
+ax.grid()
+ax.fill_between(k_list, train_scores_mean - train_scores_std,
+                     train_scores_mean + train_scores_std, alpha=0.1,
+                     color="r")
+ax.fill_between(k_list, test_scores_mean - test_scores_std,
+                     test_scores_mean + test_scores_std, alpha=0.1,
+                     color="g")
+ax.plot(k_list, train_scores_mean, 'o-', color="r",
+        label="Training score")
+ax.plot(k_list, test_scores_mean, 'o-', color="g",
+        label="Test score")
+ax.legend()
+
+#%% fitting an optimal k-NN classifier and evaluating it on the test set
+cv_20fold = model_selection.StratifiedKFold(n_splits=10)
+results = []
+best_n_neighbors = []
+
+# Loop over the folds
+for validation_index, test_index in cv_20fold.split(X, Y):
+    # Split the data properly
+    X_validation = X.iloc[validation_index]
+    y_validation = Y.iloc[validation_index]
+
+    X_test = X.iloc[test_index]
+    y_test = Y.iloc[test_index]
+
+    # Create a grid search to find the optimal k using a gridsearch and 10-fold cross validation
+    parameters = {"n_neighbors": list(range(1, 26, 2))}
+    knn = neighbors.KNeighborsClassifier()
+    cv_10fold = model_selection.StratifiedKFold(n_splits=10)
+    grid_search = model_selection.GridSearchCV(knn, parameters, cv=cv_10fold, scoring='roc_auc')
+    grid_search.fit(X_validation, y_validation)
+
+    # Get resulting classifier
+    clf = grid_search.best_estimator_
+    print(f'Best classifier: k={clf.n_neighbors}')
+    best_n_neighbors.append(clf.n_neighbors)
+
+    # Test the classifier on the test data
+    probabilities = clf.predict_proba(X_test)
+    scores = probabilities[:, 1]
+
+    # Get the auc
+    auc = metrics.roc_auc_score(y_test, scores)
+    results.append({
+        'auc': auc,
+        'k': clf.n_neighbors,
+        'set': 'test'
+    })
+
+    # Test the classifier on the validation data
+    probabilities_validation = clf.predict_proba(X_validation)
+    scores_validation = probabilities_validation[:, 1]
+
+    # Get the auc
+    auc_validation = metrics.roc_auc_score(y_validation, scores_validation)
+    results.append({
+        'auc': auc_validation,
+        'k': clf.n_neighbors,
+        'set': 'validation'
+    })
+
+# Create results dataframe and plot it
+results = pd.DataFrame(results)
+seaborn.boxplot(y='auc', x='set', data=results)
+
+optimal_n = int(np.median(best_n_neighbors))
+
+#%% do the same thing but with scaling and PCA
+X_train, X_test, y_train, y_test = model_selection.train_test_split(X, Y)
+
+# Scale the data to be normal
+scaler = preprocessing.StandardScaler()
+scaler.fit(X_train)
+X_train_scaled = scaler.transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Perform a PCA
+pca = decomposition.PCA(n_components=10)
+pca.fit(X_train_scaled)
+X_train_pca = pca.transform(X_train_scaled)
+X_test_pca = pca.transform(X_test_scaled)
+
+# Fit kNN
+knn = neighbors.KNeighborsClassifier(n_neighbors=23)
+knn.fit(X_train_pca, y_train)
+score_train = knn.score(X_train_pca, y_train)
+score_test = knn.score(X_test_pca, y_test)
+
+# Print result
+print(f"Training result: {score_train}")
+print(f"Test result: {score_test}")
