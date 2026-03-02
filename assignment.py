@@ -298,6 +298,9 @@ ax.plot(k_list, test_scores, 'o-', color="g",
 ax.legend(loc="best")
 
 #%% best k for multiple splits of the data
+X = data.drop('label', axis=1)
+Y = data['label']
+
 k_list = list(range(1, 26, 2))
 all_train = []
 all_test = []
