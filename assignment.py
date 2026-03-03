@@ -36,6 +36,7 @@ from sklearn.decomposition import PCA
 from sklearn.svm import SVC
 from sklearn.tree import plot_tree
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_curve, auc, confusion_matrix, classification_report
+from sklearn.metrics.pairwise import rbf_kernel
 
 #%% load data 
 with zipfile.ZipFile("ecg_data.zip","r") as zip_ref:
@@ -228,7 +229,7 @@ for clf, X1, Y1 in zip(clfs_fit, Xt, Yt):
 # a certain attribute. This attribute can be a subfunction, or again an
 # object or function, but also things like scalars or strings.
 
-    auc=metrics.roc_auc_score(Y1, y_score)
+    auc_score = metrics.roc_auc_score(Y1, y_score)
     accuracy=metrics.accuracy_score(Y1, y_pred)
     F1=metrics.f1_score(Y1,y_pred)
     precision=metrics.precision_score(Y1,y_pred)
@@ -236,7 +237,7 @@ for clf, X1, Y1 in zip(clfs_fit, Xt, Yt):
 # accuracy, AUC, f1score, precision, recall
     print(type(clf))
     print('Accuracy:' +str(accuracy))
-    print('AUC:' +str(auc))
+    print('AUC:' +str(auc_score))
     print('F1:' +str(F1))
     print('precision:' +str(precision))
     print('recall:' +str(recall))
@@ -451,9 +452,9 @@ for validation_index, test_index in cv_20fold.split(X, Y):
     scores = probabilities[:, 1]
 
     # Get the auc
-    auc = metrics.roc_auc_score(y_test, scores)
+    auc_score = metrics.roc_auc_score(y_test, scores)
     results.append({
-        'auc': auc,
+        'auc': auc_score,
         'k': clf.n_neighbors,
         'set': 'test'
     })
@@ -463,9 +464,9 @@ for validation_index, test_index in cv_20fold.split(X, Y):
     scores_validation = probabilities_validation[:, 1]
 
     # Get the auc
-    auc_validation = metrics.roc_auc_score(y_validation, scores_validation)
+    auc_validation_score = metrics.roc_auc_score(y_validation, scores_validation)
     results.append({
-        'auc': auc_validation,
+        'auc': auc_validation_score,
         'k': clf.n_neighbors,
         'set': 'validation'
     })
@@ -569,9 +570,8 @@ plt.show()
 def plot_auc(labels, probs):
     fpr = dict()
     tpr = dict()
-    roc_auc = dict()
     fpr, tpr, _ = roc_curve(labels.values.ravel(), probs[:,1].ravel())
-    roc_auc = auc(fpr, tpr)
+    roc_auc = sklm.auc(fpr, tpr)
     
     plt.figure()
     plt.plot(fpr, tpr, color = 'orange', label = 'AUC = %0.3f' % roc_auc)
