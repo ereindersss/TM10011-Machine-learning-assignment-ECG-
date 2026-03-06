@@ -23,6 +23,13 @@ from sklearn.linear_model import SGDClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn import neighbors
+from sklearn.svm import SVC
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
+from sklearn.preprocessing import StandardScaler
+from sklearn.kernel_approximation import RBFSampler
+from sklearn.metrics.pairwise import rbf_kernel, sigmoid_kernel
+import seaborn as sns
 
 #%% load data 
 with zipfile.ZipFile("ecg_data.zip","r") as zip_ref:
@@ -465,3 +472,111 @@ score_test = knn.score(X_test_pca, y_test)
 # Print result
 print(f"Training result: {score_train}")
 print(f"Test result: {score_test}")
+
+#%% Assignment E3.2 -- Support Vector Machines with kernels (ECG data)
+
+def evaluate_model_on_test(clf, X_test, y_test, name="model"):
+    y_pred = clf.predict(X_test)
+    if hasattr(clf, 'predict_proba'):
+        y_score = clf.predict_proba(X_test)[:, 1]
+    else:
+        # fall back to decision_function if available
+        if hasattr(clf, 'decision_function'):
+            y_score = clf.decision_function(X_test)
+        else:
+            y_score = y_pred
+
+    print(f"--- Evaluation: {name} ---")
+    print(classification_report(y_test, y_pred, zero_division=1))
+    auc_score = metrics.roc_auc_score(y_test, y_score)
+    acc = metrics.accuracy_score(y_test, y_pred)
+    print(f"AUC: {auc_score:.3f} | Accuracy: {acc:.3f}")
+
+    # Confusion matrix heatmap
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure()
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['0','1'], yticklabels=['0','1'])
+    plt.title(f'Confusion matrix: {name}')
+    plt.ylabel('Actual')
+    plt.xlabel('Predicted')
+
+    # ROC curve
+    try:
+        fpr, tpr, _ = roc_curve(y_test, np.asarray(y_score).ravel())
+        roc_auc = auc(fpr, tpr)
+        plt.figure()
+        plt.plot(fpr, tpr, label=f'AUC = {roc_auc:.3f}')
+        plt.plot([0,1],[0,1],'r--')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title(f'ROC: {name}')
+        plt.legend()
+    except Exception:
+        pass
+
+
+def run_e32_svm_kernels(X, Y, x_train, x_test, y_train, y_test):
+    """Train and evaluate SVMs with common kernels on ECG data.
+
+    - performs a small grid search per kernel to get reasonable hyperparameters
+    - evaluates on the provided test split and plots PCA decision boundaries
+    """
+    kernels = ['linear', 'poly', 'rbf', 'sigmoid']
+
+    results = {}
+
+    scaler = StandardScaler()
+    scaler.fit(x_train)
+    X_train_scaled = scaler.transform(x_train)
+    X_test_scaled = scaler.transform(x_test)
+
+    for kernel in kernels:
+        print(f"\nRunning kernel: {kernel}")
+        if kernel == 'poly':
+            grid = {'C': [0.01, 0.1, 1, 10, 100], 'degree': [2, 3, 4]}
+        elif kernel in ('rbf', 'sigmoid'):
+            grid = {'C': [0.01, 0.1, 1, 10, 100], 'gamma': ['scale', 'auto', 0.1, 1.0]}
+        else:
+            grid = {'C': [0.01, 0.1, 1, 10, 100]}
+
+        svc = SVC(kernel=kernel, probability=True, class_weight='balanced', random_state=42)
+        gs = GridSearchCV(svc, grid, scoring='roc_auc', cv=StratifiedKFold(n_splits=5), n_jobs=-1)
+        gs.fit(X_train_scaled, y_train)
+        best = gs.best_estimator_
+        print('Best params:', gs.best_params_)
+
+        # evaluate on test set
+        evaluate_model_on_test(best, X_test_scaled, y_test, name=f'SVM-{kernel}')
+        results[kernel] = {'best_estimator': best, 'best_params': gs.best_params_}
+
+    # Visualize decision boundaries in 2D using PCA on scaled data (train PCA on train set)
+    pca_vis = PCA(n_components=2)
+    X_train_pca = pca_vis.fit_transform(X_train_scaled)
+    X_test_pca = pca_vis.transform(X_test_scaled)
+
+    fig = plt.figure(figsize=(12, 9))
+    for i, kernel in enumerate(kernels, 1):
+        ax = fig.add_subplot(2, 2, i)
+        model = results[kernel]['best_estimator']
+
+        # create a classifier that works in PCA space by composing scaler -> pca -> classifier
+        # we'll re-fit a fresh SVC on PCA features for plotting clarity
+        clf_plot = SVC(kernel=kernel, probability=True, class_weight='balanced', random_state=42, **{k: v for k, v in results[kernel]['best_params'].items() if k in ['C','gamma','degree']})
+        clf_plot.fit(X_train_pca, y_train)
+
+        ax.set_title(f'SVM {kernel} (PCA view)')
+        ax.scatter(X_test_pca[:, 0], X_test_pca[:, 1], c=y_test, cmap=plt.cm.Paired, edgecolor='k', s=25)
+        try:
+            colorplot(clf_plot, ax, X_test_pca[:, 0], X_test_pca[:, 1])
+        except Exception:
+            pass
+
+    plt.tight_layout()
+    # Adding plt.show() here to display the plots when run!
+    plt.show()
+
+# Run E3.2 SVM kernels experiment
+try:
+    run_e32_svm_kernels(X, Y, x_train, x_test, y_train, y_test)
+except Exception as e:
+    print('E3.2 SVM kernels section encountered an error:', e)
