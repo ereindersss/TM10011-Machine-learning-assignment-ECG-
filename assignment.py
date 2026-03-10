@@ -676,3 +676,541 @@ plt.ylabel('Actual',fontsize=12)
 plt.xlabel('Prediction',fontsize=12)
 plt.title('Confusion matrix of the Random Forest')
 plt.show()
+
+#%% E3.1 RANDOM FOREST ENSEMBLES 
+
+# General packages
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn import datasets as ds
+
+# Classifiers
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import BaggingClassifier
+from sklearn.ensemble import VotingClassifier
+
+
+# %%
+# Some functions we will use
+from sklearn.decomposition import PCA
+
+def colorplot(clf, ax, x, y, h=100):
+    '''
+    Overlay the decision areas as colors in an axes.
+
+    Input:
+        clf: trained classifier
+        ax: axis to overlay color mesh on
+        x: feature on x-axis
+        y: feature on y-axis
+        h(optional): steps in the mesh
+    '''
+    # Create a meshgrid the size of the axis
+    xstep = (x.max() - x.min() ) / 20.0
+    ystep = (y.max() - y.min() ) / 20.0
+    x_min, x_max = x.min() - xstep, x.max() + xstep
+    y_min, y_max = y.min() - ystep, y.max() + ystep
+    h = max((x_max - x_min, y_max - y_min))/h
+    xx, yy = np.meshgrid(np.arange(x_min, x_max, h),
+                         np.arange(y_min, y_max, h))
+
+    # Plot the decision boundary. For that, we will assign a color to each
+    # point in the mesh [x_min, x_max]x[y_min, y_max].
+    if hasattr(clf, "decision_function"):
+        Z = clf.decision_function(np.c_[xx.ravel(), yy.ravel()])
+    else:
+        Z = clf.predict_proba(np.c_[xx.ravel(), yy.ravel()])
+    if len(Z.shape) > 1:
+        Z = Z[:, 1]
+
+    # Put the result into a color plot
+    cm = plt.cm.RdBu_r
+    Z = Z.reshape(xx.shape)
+    ax.contourf(xx, yy, Z, cmap=cm, alpha=.8)
+    del xx, yy, x_min, x_max, y_min, y_max, Z, cm
+
+def load_breast_cancer(n_features=2):
+    '''
+    Load the sklearn breast data set, but reduce the number of features with PCA.
+    '''
+    data = ds.load_breast_cancer()
+    x = data['data']
+    y = data['target']
+
+    p = PCA(n_components=n_features)
+    p = p.fit(x)
+    x = p.transform(x)
+    return x, y
+
+def load_boston(n_features=1):
+    '''
+    Load the sklearn boston data set, but reduce the number of features with PCA.
+    '''
+    data = ds.load_boston()
+    x = data['data']
+    y = data['target']
+
+    p = PCA(n_components=n_features)
+    p = p.fit(x)
+    x = p.transform(x)
+    return x, y
+
+def load_diabetes(n_features=1):
+    '''
+    Load the sklearn bdiabetes data set, but reduce the number of features with PCA.
+    '''
+    data = ds.load_diabetes()
+    x = data['data']
+    y = data['target']
+
+    p = PCA(n_components=n_features)
+    p = p.fit(x)
+    x = p.transform(x)
+    return x, y
+
+#%%
+import pandas as pd
+import os
+import zipfile
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.model_selection import train_test_split
+
+# Load data function
+def load_data():
+    this_directory = os.path.dirname(os.path.abspath(__file__))
+    # Try to load from current directory
+    try:
+        data = pd.read_csv('ecg_data/ecg_data.csv', index_col=0)
+    except:
+        # If not found, try extracting from zip
+        with zipfile.ZipFile("ecg_data.zip", "r") as zip_ref:
+            zip_ref.extractall("ecg_data")
+        data = pd.read_csv('ecg_data/ecg_data.csv', index_col=0)
+    return data
+
+# Load and prepare data
+print("Loading data...")
+raw_data = load_data()
+X = raw_data.drop('label', axis=1)
+Y = raw_data['label']
+x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=0.25, random_state=5, stratify=Y)
+print(f"Data loaded! x_train shape: {x_train.shape}, x_test shape: {x_test.shape}")
+
+# 1) scale -> PCA (fit alleen op train!)
+scaler = StandardScaler()
+x_train_scaled = scaler.fit_transform(x_train)
+x_test_scaled  = scaler.transform(x_test)
+
+pca = PCA(n_components=2, random_state=0)
+x_train_reduced = pca.fit_transform(x_train_scaled)
+x_test_reduced  = pca.transform(x_test_scaled)
+
+y_train_np = np.array(y_train)
+y_test_np  = np.array(y_test)
+
+print("Train reduced:", x_train_reduced.shape, "Test reduced:", x_test_reduced.shape)
+print("Explained variance ratio:", pca.explained_variance_ratio_)
+
+#%% E3.1 Apply ensemble methods to ECG data with PCA
+
+print("\n" + "="*60)
+print("ENSEMBLE METHODS ON ECG DATA (PCA-reduced)")
+print("="*60)
+
+# Import necessary modules
+from sklearn import metrics
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier, BaggingClassifier, VotingClassifier
+import matplotlib.pyplot as plt
+
+# Define colorplot function for decision boundaries
+def colorplot(clf, ax, x, y, h=100):
+    '''
+    Overlay the decision areas as colors in an axes.
+    '''
+    xstep = (x.max() - x.min()) / 20.0
+    ystep = (y.max() - y.min()) / 20.0
+    x_min, x_max = x.min() - xstep, x.max() + xstep
+    y_min, y_max = y.min() - ystep, y.max() + ystep
+    h = max((x_max - x_min, y_max - y_min))/h
+    xx, yy = np.meshgrid(np.arange(x_min, x_max, h),
+                         np.arange(y_min, y_max, h))
+
+    if hasattr(clf, "decision_function"):
+        Z = clf.decision_function(np.c_[xx.ravel(), yy.ravel()])
+    else:
+        Z = clf.predict_proba(np.c_[xx.ravel(), yy.ravel()])
+    if len(Z.shape) > 1:
+        Z = Z[:, 1]
+
+    cm = plt.cm.RdBu_r
+    Z = Z.reshape(xx.shape)
+    ax.contourf(xx, yy, Z, cmap=cm, alpha=.8)
+    del xx, yy, x_min, x_max, y_min, y_max, Z, cm
+
+# Ensure PCA-reduced data exists (for interactive notebooks)
+if 'x_train_reduced' not in locals():
+    print("Creating PCA-reduced data...")
+    # Load data if needed
+    if 'x_train' not in locals():
+        raw_data = load_data()
+        X = raw_data.drop('label', axis=1)
+        Y = raw_data['label']
+        x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=0.25, random_state=5, stratify=Y)
+    
+    # Create PCA reduction to 2 components
+    pca = PCA(n_components=2)
+    x_train_reduced = pca.fit_transform(x_train)
+    x_test_reduced = pca.transform(x_test)
+    print(f"PCA-reduced data created: train shape {x_train_reduced.shape}, test shape {x_test_reduced.shape}")
+
+# Use the PCA-reduced data from earlier (x_train_reduced, x_test_reduced)
+# which were already created with 2 components for visualization
+
+# Define ensemble models
+dt = DecisionTreeClassifier(random_state=0)
+knn = KNeighborsClassifier(n_neighbors=7)
+rf = RandomForestClassifier(n_estimators=100, random_state=0, n_jobs=-1, class_weight="balanced")
+bag_dt = BaggingClassifier(
+    estimator=DecisionTreeClassifier(random_state=0),
+    n_estimators=100,
+    random_state=0,
+    n_jobs=-1
+)
+vote_clf = VotingClassifier(
+    estimators=[("dt", dt), ("knn", knn), ("rf", rf)],
+    voting="soft"
+)
+
+models = {
+    "DecisionTree": dt,
+    "kNN": knn,
+    "RandomForest": rf,
+    "Bagging(DT)": bag_dt,
+    "VotingClassifier": vote_clf,
+}
+
+# Train and evaluate all models
+fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+axes = axes.flatten()
+
+for idx, (name, clf) in enumerate(models.items()):
+    print(f"\nTraining {name}...")
+    clf.fit(x_train_reduced, y_train)
+    
+    # Predictions on test set
+    y_pred = clf.predict(x_test_reduced)
+    
+    # Get probabilities for AUC
+    if hasattr(clf, "predict_proba"):
+        y_proba = clf.predict_proba(x_test_reduced)[:, 1]
+    else:
+        y_proba = y_pred
+    
+    # Calculate metrics
+    acc = metrics.accuracy_score(y_test, y_pred)
+    auc_score = metrics.roc_auc_score(y_test, y_proba)
+    f1 = metrics.f1_score(y_test, y_pred)
+    prec = metrics.precision_score(y_test, y_pred, zero_division=0)
+    rec = metrics.recall_score(y_test, y_pred, zero_division=0)
+    
+    print(f"  Accuracy:  {acc:.4f}")
+    print(f"  AUC:       {auc_score:.4f}")
+    print(f"  F1-Score:  {f1:.4f}")
+    print(f"  Precision: {prec:.4f}")
+    print(f"  Recall:    {rec:.4f}")
+    
+    # Plot decision boundary
+    ax = axes[idx]
+    ax.scatter(x_test_reduced[:, 0], x_test_reduced[:, 1], 
+              c=y_test, s=30, edgecolor='k', cmap=plt.cm.Paired, alpha=0.7)
+    colorplot(clf, ax, x_test_reduced[:, 0], x_test_reduced[:, 1], h=100)
+    ax.set_title(f"{name}\nAccuracy: {acc:.3f}, AUC: {auc_score:.3f}")
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+
+plt.tight_layout()
+plt.show()
+
+print("\n" + "="*60)
+print("Ensemble methods evaluation complete!")
+print("="*60)
+
+#%% Comprehensive Classifier Comparison (All Ensemble Methods)
+
+print("\n" + "="*60)
+print("COMPREHENSIVE CLASSIFIER COMPARISON ON ECG DATA")
+print("="*60)
+
+# Construct classifiers
+dt_clf = DecisionTreeClassifier(random_state=0)
+knn_clf = KNeighborsClassifier(n_neighbors=7)
+rf_clf = RandomForestClassifier(n_estimators=100, random_state=0)
+bagging_clf = BaggingClassifier(estimator=DecisionTreeClassifier(random_state=0), n_estimators=100, random_state=0)
+voting_clf = VotingClassifier(
+    estimators=[('knn', KNeighborsClassifier(n_neighbors=7)), 
+                ('dt', DecisionTreeClassifier(random_state=0)), 
+                ('rf', RandomForestClassifier(n_estimators=100, random_state=0))],
+    voting='soft')
+
+classifiers = [knn_clf, dt_clf, rf_clf, bagging_clf, voting_clf]
+classifier_names = ['k-NN (k=7)', 'Decision Tree', 'Random Forest', 'Bagging', 'Voting Ensemble']
+
+print("Training classifiers on PCA-reduced ECG data...")
+
+# Create comparison figure
+num_plots = len(classifiers) + 1  # +1 for data visualization
+fig = plt.subplots(1, num_plots, figsize=(4*num_plots, 4))
+axes = fig[1].flatten() if num_plots > 1 else [fig[1]]
+
+# First subplot: show the raw data
+axid = 0
+axes[axid].scatter(x_test_reduced[:, 0], x_test_reduced[:, 1], 
+                  c=y_test, s=30, edgecolor='k', cmap=plt.cm.Paired, alpha=0.7)
+axes[axid].set_title('ECG Data\n(Test Set)')
+axes[axid].set_xlabel('PC1')
+axes[axid].set_ylabel('PC2')
+
+# Train and evaluate each classifier
+for clf_idx, (clf, clf_name) in enumerate(zip(classifiers, classifier_names)):
+    print(f"\n  Training {clf_name}...")
+    clf.fit(x_train_reduced, y_train)
+    
+    y_pred = clf.predict(x_test_reduced)
+    if hasattr(clf, "predict_proba"):
+        y_proba = clf.predict_proba(x_test_reduced)[:, 1]
+    else:
+        y_proba = y_pred
+    
+    acc = metrics.accuracy_score(y_test, y_pred)
+    auc_score = metrics.roc_auc_score(y_test, y_proba)
+    f1 = metrics.f1_score(y_test, y_pred)
+    
+    print(f"    Accuracy: {acc:.4f}, AUC: {auc_score:.4f}, F1: {f1:.4f}")
+    
+    # Plot decision boundaries
+    axid = clf_idx + 1
+    axes[axid].scatter(x_test_reduced[:, 0], x_test_reduced[:, 1], 
+                       c=y_test, s=30, edgecolor='k', cmap=plt.cm.Paired, alpha=0.7)
+    colorplot(clf, axes[axid], x_test_reduced[:, 0], x_test_reduced[:, 1], h=100)
+    axes[axid].set_title(f'{clf_name}\nAcc: {acc:.3f}, AUC: {auc_score:.3f}')
+    axes[axid].set_xlabel('PC1')
+    axes[axid].set_ylabel('PC2')
+
+plt.tight_layout()
+plt.show()
+
+#%% Hyperparameter tuning: Impact of n_estimators (number of trees)
+
+print("\n" + "="*60)
+print("HYPERPARAMETER TUNING: Number of Trees (n_estimators)")
+print("="*60)
+
+n_trees = [1, 5, 10, 50, 100]
+fig, axes = plt.subplots(1, len(n_trees), figsize=(20, 4))
+
+for idx, n_tree in enumerate(n_trees):
+    print(f"\nTraining RandomForest with n_estimators={n_tree}...")
+    clf = RandomForestClassifier(n_estimators=n_tree, random_state=0)
+    clf.fit(x_train_reduced, y_train)
+    
+    y_pred = clf.predict(x_test_reduced)
+    if hasattr(clf, "predict_proba"):
+        y_proba = clf.predict_proba(x_test_reduced)[:, 1]
+    else:
+        y_proba = y_pred
+    
+    acc = metrics.accuracy_score(y_test, y_pred)
+    auc_score = metrics.roc_auc_score(y_test, y_proba)
+    
+    print(f"  Accuracy: {acc:.4f}, AUC: {auc_score:.4f}")
+    
+    ax = axes[idx]
+    ax.scatter(x_test_reduced[:, 0], x_test_reduced[:, 1], 
+              c=y_test, s=30, edgecolor='k', cmap=plt.cm.Paired, alpha=0.7)
+    colorplot(clf, ax, x_test_reduced[:, 0], x_test_reduced[:, 1], h=100)
+    ax.set_title(f"n_estimators={n_tree}\nAccuracy: {acc:.3f}")
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+
+plt.tight_layout()
+plt.show()
+
+#%% Hyperparameter tuning: Impact of bootstrap
+
+print("\n" + "="*60)
+print("HYPERPARAMETER TUNING: Bootstrap True vs False")
+print("="*60)
+
+boot_configs = [
+    (5, True, "5 trees, Bootstrap=True"),
+    (5, False, "5 trees, Bootstrap=False"),
+    (50, True, "50 trees, Bootstrap=True"),
+    (50, False, "50 trees, Bootstrap=False")
+]
+
+# Create figure with subplots (1 for raw data + 4 for each bootstrap config)
+num = 0
+fig = plt.figure(figsize=(20, 4))
+
+# First plot: show raw ECG test data
+ax = fig.add_subplot(1, 5, num + 1)
+ax.scatter(x_test_reduced[:, 0], x_test_reduced[:, 1], 
+          c=y_test, s=30, edgecolor='k', cmap=plt.cm.Paired, alpha=0.7)
+ax.set_title('ECG Data\n(Test Set)')
+ax.set_xlabel("PC1")
+ax.set_ylabel("PC2")
+num += 1
+
+# Now plot decision boundaries for each bootstrap configuration
+for n_est, boot, title in boot_configs:
+    print(f"Training RandomForest with n_estimators={n_est}, bootstrap={boot}...")
+    clf = RandomForestClassifier(n_estimators=n_est, bootstrap=boot, random_state=0)
+    clf.fit(x_train_reduced, y_train)
+    
+    y_pred = clf.predict(x_test_reduced)
+    if hasattr(clf, "predict_proba"):
+        y_proba = clf.predict_proba(x_test_reduced)[:, 1]
+    else:
+        y_proba = y_pred
+    
+    acc = metrics.accuracy_score(y_test, y_pred)
+    auc_score = metrics.roc_auc_score(y_test, y_proba)
+    
+    print(f"  Accuracy: {acc:.4f}, AUC: {auc_score:.4f}")
+    
+    ax = fig.add_subplot(1, 5, num + 1)
+    ax.scatter(x_test_reduced[:, 0], x_test_reduced[:, 1], 
+              c=y_test, s=30, edgecolor='k', cmap=plt.cm.Paired, alpha=0.7)
+    colorplot(clf, ax, x_test_reduced[:, 0], x_test_reduced[:, 1], h=100)
+    ax.set_title(f"{title}\nAcc: {acc:.3f}, AUC: {auc_score:.3f}")
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+    num += 1
+
+plt.tight_layout()
+plt.show()
+
+#%% Hyperparameter tuning: Impact of class_weight
+
+print("\n" + "="*60)
+print("HYPERPARAMETER TUNING: Class Weight for Imbalanced Data")
+print("="*60)
+
+class_weights = [
+    ({0: 1, 1: 0.001}, "Class weight {0:1, 1:0.001}"),
+    ({0: 1, 1: 1}, "Class weight {0:1, 1:1}"),
+    ({0: 1, 1: 10}, "Class weight {0:1, 1:10}"),
+    ({0: 1, 1: 100}, "Class weight {0:1, 1:100}")
+]
+
+# Create figure with subplots (1 for raw data + 4 for each class_weight config)
+num = 0
+fig = plt.figure(figsize=(20, 4))
+
+# First plot: show raw ECG test data
+ax = fig.add_subplot(1, 5, num + 1)
+ax.scatter(x_test_reduced[:, 0], x_test_reduced[:, 1], 
+          c=y_test, s=30, edgecolor='k', cmap=plt.cm.Paired, alpha=0.7)
+ax.set_title('ECG Data\n(Test Set)')
+ax.set_xlabel("PC1")
+ax.set_ylabel("PC2")
+num += 1
+
+# Now plot decision boundaries for each class_weight configuration
+for cw, title in class_weights:
+    print(f"Training RandomForest with class_weight={cw}...")
+    clf = RandomForestClassifier(n_estimators=100, class_weight=cw, random_state=0)
+    clf.fit(x_train_reduced, y_train)
+    
+    y_pred = clf.predict(x_test_reduced)
+    if hasattr(clf, "predict_proba"):
+        y_proba = clf.predict_proba(x_test_reduced)[:, 1]
+    else:
+        y_proba = y_pred
+    
+    acc = metrics.accuracy_score(y_test, y_pred)
+    auc_score = metrics.roc_auc_score(y_test, y_proba)
+    
+    print(f"  Accuracy: {acc:.4f}, AUC: {auc_score:.4f}")
+    
+    ax = fig.add_subplot(1, 5, num + 1)
+    ax.scatter(x_test_reduced[:, 0], x_test_reduced[:, 1], 
+              c=y_test, s=30, edgecolor='k', cmap=plt.cm.Paired, alpha=0.7)
+    colorplot(clf, ax, x_test_reduced[:, 0], x_test_reduced[:, 1], h=100)
+    ax.set_title(f"{title}\nAcc: {acc:.3f}, AUC: {auc_score:.3f}")
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+    num += 1
+
+plt.tight_layout()
+plt.show()
+
+#%% Feature Importance Analysis on full ECG features
+
+print("\n" + "="*60)
+print("FEATURE IMPORTANCE ANALYSIS (using all ECG features)")
+print("="*60)
+
+# Train RandomForest on full feature set
+print("Training RandomForest on full feature set...")
+forest = RandomForestClassifier(n_estimators=100, random_state=0, class_weight='balanced')
+forest.fit(x_train, y_train)
+
+# Get feature importances and calculate standard deviation
+importances = forest.feature_importances_
+std = np.std([tree.feature_importances_ for tree in forest.estimators_], axis=0)
+indices = np.argsort(importances)[::-1]
+
+# Print feature ranking
+print("\nFeature ranking (top 30):")
+for f in range(min(30, len(importances))):
+    feature_idx = indices[f]
+    feature_name = x_train.columns[feature_idx] if hasattr(x_train, 'columns') else f"Feature {feature_idx}"
+    print("%d. %s (importance: %.4f +/- %.4f)" % (f + 1, feature_name, importances[feature_idx], std[feature_idx]))
+
+# Plot feature importances - Top 30 features
+plt.figure(figsize=(14, 8))
+top_features = min(30, len(importances))
+plt.bar(range(top_features), importances[indices[:top_features]], 
+        color="steelblue", yerr=std[indices[:top_features]], align="center")
+plt.xlabel('Feature Rank')
+plt.ylabel('Importance')
+plt.title('RandomForest - Top 30 Feature Importances (ECG Data)')
+feature_labels = [x_train.columns[indices[i]] if hasattr(x_train, 'columns') else f"F{indices[i]}" 
+                  for i in range(top_features)]
+plt.xticks(range(top_features), feature_labels, rotation=45, ha='right')
+plt.tight_layout()
+plt.show()
+
+# Evaluate performance on full feature set
+y_pred_full = forest.predict(x_test)
+y_proba_full = forest.predict_proba(x_test)[:, 1]
+
+acc_full = metrics.accuracy_score(y_test, y_pred_full)
+auc_full = metrics.roc_auc_score(y_test, y_proba_full)
+f1_full = metrics.f1_score(y_test, y_pred_full)
+prec_full = metrics.precision_score(y_test, y_pred_full, zero_division=0)
+rec_full = metrics.recall_score(y_test, y_pred_full, zero_division=0)
+
+print(f"\nRandomForest Performance on FULL feature set:")
+print(f"  Accuracy:  {acc_full:.4f}")
+print(f"  AUC:       {auc_full:.4f}")
+print(f"  F1-Score:  {f1_full:.4f}")
+print(f"  Precision: {prec_full:.4f}")
+print(f"  Recall:    {rec_full:.4f}")
+
+print("\n" + "="*60)
+print("Feature importance analysis complete!")
+print("="*60)
+
+# Show all plots
+plt.show()
+
+
+# %%
