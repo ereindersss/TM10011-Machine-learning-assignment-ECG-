@@ -551,11 +551,12 @@ print("F1-Score:", f1)
 recall = recall_score(y_test, y_pred)
 print("Recall (Sensitivity):", recall)
 
-confusion_matrix = confusion_matrix(y_test, y_pred)
-TN, FP, FN, TP = confusion_matrix.ravel()
+# avoid shadowing sklearn.metrics.confusion_matrix by naming the result `cm`
+cm = sklm.confusion_matrix(y_test, y_pred)
+TN, FP, FN, TP = cm.ravel()
 print("TN: {}, FP: {}, FN: {}, TP: {}\n".format(TN, FP, FN, TP))
 
-sns.heatmap(confusion_matrix,
+sns.heatmap(cm,
             annot=True,
             cmap="Blues",
             fmt='g',
@@ -567,15 +568,19 @@ plt.xlabel('Prediction',fontsize=12)
 plt.show()
 
 def plot_auc(labels, probs):
-    fpr = dict()
-    tpr = dict()
-    roc_auc = dict()
-    fpr, tpr, _ = roc_curve(labels.values.ravel(), probs[:,1].ravel())
-    roc_auc = auc(fpr, tpr)
-    
+    """Plot ROC curve using sklearn metrics without relying on a global ``auc`` variable.
+
+    The helper uses ``metrics.auc`` explicitly to avoid name collisions with
+    any float named ``auc`` defined elsewhere in the notebook/module.
+    """
+    # compute false/true positive rates
+    fpr, tpr, _ = roc_curve(labels.values.ravel(), probs[:, 1].ravel())
+    # use the module-qualified function to prevent shadowing
+    roc_auc_value = metrics.auc(fpr, tpr)
+
     plt.figure()
-    plt.plot(fpr, tpr, color = 'orange', label = 'AUC = %0.3f' % roc_auc)
-    plt.plot([0, 1], [0, 1],'r--')
+    plt.plot(fpr, tpr, color='orange', label='AUC = %0.3f' % roc_auc_value)
+    plt.plot([0, 1], [0, 1], 'r--')
     plt.xlim([0.0, 1.0])
     plt.ylim([0.0, 1.])
     plt.xlabel('False Positive Rate')
